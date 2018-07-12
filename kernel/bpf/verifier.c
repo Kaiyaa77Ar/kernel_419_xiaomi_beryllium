@@ -11531,6 +11531,10 @@ static int jit_subprogs(struct bpf_verifier_env *env)
 		    insn->src_reg != BPF_PSEUDO_CALL)
 			continue;
 		insn->off = env->insn_aux_data[i].call_imm;
+		/* Upon error here we cannot fall back to interpreter but
+		 * need a hard reject of the program. Thus -EFAULT is
+		 * propagated in any case.
+		 */
 		subprog = find_subprog(env, i + insn->off + 1);
 		insn->imm = subprog;
 	}
