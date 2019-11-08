@@ -309,12 +309,9 @@ static void stack_map_get_build_id_offset(struct bpf_stack_build_id *id_offs,
 				irq_work_busy = true;
 			}
 		} else {
-			/*
-			 * PREEMPT_RT does not allow to trylock mmap sem in
-			 * interrupt disabled context. Force the fallback code.
-			 */
 			irq_work_busy = true;
 		}
+
 	}
 
 	/*
