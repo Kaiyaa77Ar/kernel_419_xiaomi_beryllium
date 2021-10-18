@@ -1304,8 +1304,4 @@ struct cpufreq_governor *cpufreq_default_governor(void)
 }
 #endif
 
-static int __init waltgov_register(void)
-{
-	return cpufreq_register_governor(&walt_gov);
-}
-fs_initcall(waltgov_register);
+cpufreq_governor_init(walt_gov);
