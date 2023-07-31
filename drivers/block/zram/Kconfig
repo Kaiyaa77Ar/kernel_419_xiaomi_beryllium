@@ -74,4 +74,4 @@ config ZRAM_ENTROPY_THRESHOLD
 
 config ZRAM_DEFAULT_COMP_ALGORITHM
 	string "Default ZRAM compression algorithm"
-	default "lzo"
+	default "lz4"
