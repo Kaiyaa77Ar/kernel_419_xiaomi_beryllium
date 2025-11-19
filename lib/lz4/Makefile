@@ -1,4 +1,4 @@
-ccflags-y += -O3 \
+ccflags-y += -O2 \
      -DLZ4_FREESTANDING=1 \
      -DLZ4_FAST_DEC_LOOP=1
 
