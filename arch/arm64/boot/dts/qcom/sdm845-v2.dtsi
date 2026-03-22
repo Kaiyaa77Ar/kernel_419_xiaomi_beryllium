@@ -366,10 +366,16 @@
 	operating-points-v2 = <&llcc_bw_opp_table_v2>;
 };
 
+&cpu0_computemon {
+	qcom,core-dev-table =
+		< 1708800 MHZ_TO_MBPS(200, 4) >,
+		< 1766400 MHZ_TO_MBPS(451, 4) >;
+};
+
 &cpu4_computemon {
 	qcom,core-dev-table =
 		< 1881600 MHZ_TO_MBPS( 200, 4) >,
-		< 2649600 MHZ_TO_MBPS(1017, 4) >,
+		< 2400000 MHZ_TO_MBPS(1017, 4) >,
 		< 2745600 MHZ_TO_MBPS(1804, 4) >;
 };
 
