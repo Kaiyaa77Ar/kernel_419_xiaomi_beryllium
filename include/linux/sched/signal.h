@@ -9,7 +9,7 @@
 #include <linux/sched/task.h>
 #include <linux/cred.h>
 #include <linux/android_kabi.h>
-#include <linux/mm.h>
+#include <linux/mm_types.h>
 #include <asm/ptrace.h>
 
 /*
