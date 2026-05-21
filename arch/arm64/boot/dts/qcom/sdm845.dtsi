@@ -354,7 +354,7 @@
 	};
 
 	chosen {
-		bootargs = "rcupdate.rcu_expedited=1 rcu_nocbs=0-7 cgroup.memory=nokmem,nosocket norandmaps kpti=0 ssbd=force-off";
+		bootargs = "rcupdate.rcu_expedited=1 rcu_nocbs=0-7 cgroup.memory=nokmem,nosocket norandmaps nosoftlockup mce=ignore_ce kpti=0 ssbd=force-off";
 	};
 
 	soc: soc { };
