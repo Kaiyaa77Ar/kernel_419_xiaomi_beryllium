@@ -31,6 +31,7 @@
 				__func__, ##__VA_ARGS__);	\
 	} while (0)
 
+static int bypass_charging = 0;
 #if defined(CONFIG_MACH_XIAOMI_SDM845)
 static bool off_charge_flag;
 static void smblib_wireless_set_enable(struct smb_charger *chg, int enable);
@@ -2060,13 +2061,13 @@ int smblib_vbus_regulator_is_enabled(struct regulator_dev *rdev)
 int smblib_get_prop_input_suspend(struct smb_charger *chg,
 				  union power_supply_propval *val)
 {
-	val->intval
-		= (get_client_vote(chg->usb_icl_votable, USER_VOTER) == 0)
-#if defined(CONFIG_MACH_XIAOMI_SDM845)
-		|| get_client_vote(chg->dc_suspend_votable, USER_VOTER);
-#else
-		 && get_client_vote(chg->dc_suspend_votable, USER_VOTER);
-#endif
+	if (get_client_vote(chg->chg_disable_votable, BYPASS_VOTER) == 1) {
+		val->intval = 1;
+	} else if (bypass_charging) {
+		val->intval = 2;
+	} else {
+		val->intval = 0;
+	}
 	return 0;
 }
 
@@ -2496,10 +2497,10 @@ int smblib_get_prop_from_bms(struct smb_charger *chg,
 int smblib_set_prop_input_suspend(struct smb_charger *chg,
 				  const union power_supply_propval *val)
 {
-	int rc;
+	int rc = 0;
 
 	/* vote 0mA when suspended */
-	rc = vote(chg->usb_icl_votable, USER_VOTER, (bool)val->intval, 0);
+	rc = vote(chg->usb_icl_votable, USER_VOTER, false, 0);
 	if (rc < 0) {
 		smblib_err(chg, "Couldn't vote to %s USB rc=%d\n",
 			(bool)val->intval ? "suspend" : "resume", rc);
@@ -2518,6 +2519,20 @@ int smblib_set_prop_input_suspend(struct smb_charger *chg,
 #if defined(CONFIG_MACH_XIAOMI_SDM845)
 	smblib_wireless_set_enable(chg, !val->intval);
 #endif
+
+    	if (val->intval == 1) {
+		rc = vote(chg->chg_disable_votable, BYPASS_VOTER, true, 0);
+		bypass_charging = 0;
+	} else if (val->intval == 2) {
+		rc = vote(chg->chg_disable_votable, BYPASS_VOTER, false, 0);
+		bypass_charging = 1;
+	} else {
+		rc = vote(chg->chg_disable_votable, BYPASS_VOTER, false, 0);
+		bypass_charging = 0;
+	}
+
+	if (rc < 0)
+		return rc;
 
 	power_supply_changed(chg->batt_psy);
 	return rc;
@@ -2554,6 +2569,8 @@ int smblib_set_prop_dc_temp_level(struct smb_charger *chg,
 	union power_supply_propval dc_present;
 	union power_supply_propval batt_temp;
 	int rc;
+	int system_temp_level;
+	int thermal_mitigation_level;
 
 	rc = smblib_get_prop_dc_present(chg, &dc_present);
 	if (rc < 0) {
@@ -2578,21 +2595,33 @@ int smblib_set_prop_dc_temp_level(struct smb_charger *chg,
 
 	if (!dc_present.intval)
 		return 0;
-	if (chg->dc_temp_level == chg->dc_thermal_levels)
-		return vote(chg->chg_disable_votable,
-			THERMAL_DAEMON_VOTER, true, 0);
+	if (get_client_vote(chg->chg_disable_votable, BYPASS_VOTER) == 1) {
+		vote(chg->chg_disable_votable, THERMAL_DAEMON_VOTER, false, 0);
+		return vote(chg->dc_icl_votable, THERMAL_DAEMON_VOTER, false, 0);
+	}
+
+	system_temp_level = chg->dc_temp_level;
+
+	if (bypass_charging) {
+		system_temp_level -= 2;
+		if (system_temp_level < 0) system_temp_level = 0;
+	}
+
+	thermal_mitigation_level = system_temp_level;
+ 
+	if (thermal_mitigation_level >= chg->dc_thermal_levels)
+		return vote(chg->chg_disable_votable, THERMAL_DAEMON_VOTER, true, 0);
 
 	vote(chg->chg_disable_votable, THERMAL_DAEMON_VOTER, false, 0);
-	if (chg->dc_temp_level == 0)
-		return vote(chg->dc_icl_votable, THERMAL_DAEMON_VOTER, false, 0);
 
 	smblib_dbg(chg, PR_OEM, "thermal level:%d, batt temp:%d, thermal_levels:%d dc_present=%d\n",
 			val->intval, batt_temp.intval, chg->dc_thermal_levels,dc_present.intval);
 
-	vote(chg->dc_icl_votable, THERMAL_DAEMON_VOTER, true,
-		chg->thermal_mitigation_dc[chg->dc_temp_level]);
+	if (thermal_mitigation_level <= 0)
+		return vote(chg->dc_icl_votable, THERMAL_DAEMON_VOTER, false, 0);
 
-	return 0;
+	return vote(chg->dc_icl_votable, THERMAL_DAEMON_VOTER, true,
+		chg->thermal_mitigation_dc[thermal_mitigation_level]);
 }
 #endif
 
