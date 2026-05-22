@@ -146,6 +146,7 @@ config ARM64
 	select HAVE_GENERIC_DMA_COHERENT
 	select HAVE_HW_BREAKPOINT if PERF_EVENTS
 	select HAVE_IRQ_TIME_ACCOUNTING
+	select HAVE_LD_DEAD_CODE_DATA_ELIMINATION
 	select HAVE_KERNEL_GZIP
 	select HAVE_KERNEL_LZ4
 	select HAVE_MEMBLOCK
@@ -1263,7 +1264,7 @@ config SWP_EMULATION
 	  on an external transaction monitoring block called a global
 	  monitor to maintain update atomicity. If your system does not
 	  implement a global monitor, this option can cause programs that
-	  perform SWP operations to uncached memory to deadlock.
+	  perform SWP operations to uncached memory to glock.
 
 	  If unsure, say Y
 
