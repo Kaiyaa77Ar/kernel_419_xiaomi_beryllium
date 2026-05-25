@@ -71,3 +71,7 @@ config ZRAM_ENTROPY_THRESHOLD
 	help
 	  Pages with entropy above ZRAM_ENTROPY_THRESHOLD will be stored
 	  uncompressed. The default value was chosen as a 
+
+config ZRAM_DEFAULT_COMP_ALGORITHM
+	string "Default ZRAM compression algorithm"
+	default "lzo"
