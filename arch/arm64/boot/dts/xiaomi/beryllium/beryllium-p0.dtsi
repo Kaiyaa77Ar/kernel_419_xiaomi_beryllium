@@ -1,4 +1,3 @@
-
 /* Copyright (c) 2016-2017, The Linux Foundation. All rights reserved.
  * Copyright (C) 2019 XiaoMi, Inc.
  *
@@ -348,13 +347,6 @@
 &pm8998_vadc {
 	pinctrl-names = "default";
 	pinctrl-0 = <&gpio8_adc_default>;
-
-	backlight_therm {
-		label = "backlight_therm";
-		reg = <ADC_GPIO1_PU2>;
-		qcom,hw-settle-time = <200>;
-		qcom,pre-scaling = <1 1>;
-	};
 };
 
 &pm8998_adc_tm {
@@ -367,34 +359,64 @@
 	<&pm8998_vadc ADC_AMUX_THM2_PU2>,
 	<&pm8998_vadc ADC_AMUX_THM3_PU2>,
 	<&pm8998_vadc ADC_AMUX_THM4_PU2>,
-	<&pm8998_vadc ADC_AMUX_THM5_PU2>,
-	<&pm8998_vadc ADC_GPIO1_PU2>; // beryllium-backlight
-
-	backlight_therm {
-		label = "backlight_therm";
-		reg = <ADC_GPIO1_PU2>;
-		qcom,pre-scaling = <1 1>;
-		qcom,hw-settle-time = <200>;
-		qcom,btm-channel-number = <0x98>;
-		qcom,thermal-node;
-	};
+	<&pm8998_vadc ADC_AMUX_THM5_PU2>;
 };
 
 &thermal_zones {
-	backlight_therm {
-		polling-delay-passive = <0>;
-		polling-delay = <0>;
-		thermal-sensors = <&pm8998_adc_tm ADC_GPIO1_PU2>;
-		thermal-governor = "user_space";
-		wake-capable-sensor;
+	aoss0-usr {
+		 disable-thermal-zone;
+	};
 
-		trips {
-			active-config0 {
-				temperature = <65000>;
-				hysteresis = <1000>;
-				type = "passive";
-			};
-		};
+	aoss1-usr {
+		disable-thermal-zone;
+	};
+
+	camera-usr {
+		disable-thermal-zone;
+	};
+
+	compute-hvx-usr {
+		disable-thermal-zone;
+	};
+
+	ddr-usr {
+		disable-thermal-zone;
+	};
+
+	gold-virt-max-step {
+		disable-thermal-zone;
+	};
+
+	gpu-virt-max-step {
+		disable-thermal-zone;
+	};
+
+	kryo-l3-0-usr {
+		disable-thermal-zone;
+	};
+
+	kryo-l3-1-usr {
+		disable-thermal-zone;
+	};
+
+	mdm-core-usr {
+		disable-thermal-zone;
+	};
+
+	mdm-dsp-usr {
+		disable-thermal-zone;
+	};
+
+	mmss-usr {
+		disable-thermal-zone;
+	};
+
+	silv-virt-max-step {
+		disable-thermal-zone;
+	};
+
+	wlan-usr {
+		disable-thermal-zone;
 	};
 };
 
