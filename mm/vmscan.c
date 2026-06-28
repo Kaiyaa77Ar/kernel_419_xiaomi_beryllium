@@ -194,7 +194,7 @@ int kswapd_threads_current = DEF_KSWAPD_THREADS_PER_NODE;
 #define prefetchw_prev_lru_page(_page, _base, _field) do { } while (0)
 #endif
 
-unsigned int sysctl_workingset_protection __read_mostly = 0;
+unsigned int sysctl_workingset_protection __read_mostly = 1;
 unsigned int sysctl_anon_min_ratio  __read_mostly = CONFIG_ANON_MIN_RATIO;
 unsigned int sysctl_clean_low_ratio __read_mostly = CONFIG_CLEAN_LOW_RATIO;
 unsigned int sysctl_clean_min_ratio __read_mostly = CONFIG_CLEAN_MIN_RATIO;
