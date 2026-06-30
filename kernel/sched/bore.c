@@ -12,10 +12,10 @@ uint __read_mostly sched_burst_exclude_kthreads = 1;
 uint __read_mostly sched_burst_smoothness_long  = 1;
 uint __read_mostly sched_burst_smoothness_short = 0;
 uint __read_mostly sched_burst_fork_atavistic   = 2;
-uint __read_mostly sched_burst_penalty_offset   = 24;
-uint __read_mostly sched_burst_penalty_scale    = 1280;
+uint __read_mostly sched_burst_penalty_offset   = 16;
+uint __read_mostly sched_burst_penalty_scale    = 1024;
 uint __read_mostly sched_burst_cache_stop_count = 64;
-uint __read_mostly sched_burst_cache_lifetime   = 60000000;
+uint __read_mostly sched_burst_cache_lifetime   = 30000000;
 
 static int sixty_four     = 64;
 static int maxval_12_bits = 4095;
