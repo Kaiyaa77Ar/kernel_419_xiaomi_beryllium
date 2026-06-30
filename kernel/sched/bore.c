@@ -10,11 +10,13 @@
 #ifdef CONFIG_SCHED_BORE
 
 uint __read_mostly sched_bore                   = 1;
+uint __read_mostly sched_burst_exclude_kthreads = 1;
 uint __read_mostly sched_burst_smoothness_long  = 1;
 uint __read_mostly sched_burst_smoothness_short = 0;
 uint __read_mostly sched_burst_fork_atavistic   = 2;
 uint __read_mostly sched_burst_penalty_offset   = 24;
 uint __read_mostly sched_burst_penalty_scale    = 1280;
+uint __read_mostly sched_burst_cache_stop_count = 64;
 uint __read_mostly sched_burst_cache_lifetime   = 60000000;
 
 #define MAX_BURST_PENALTY (39U << 2)
@@ -25,14 +27,21 @@ uint __read_mostly sched_burst_cache_lifetime   = 60000000;
 
 extern void reweight_task(struct task_struct *p, int prio);
 
+void reset_task_bore(struct task_struct *p)
+{
+	p->se.burst_time = 0;
+	p->se.prev_burst_penalty = 0;
+	p->se.curr_burst_penalty = 0;
+	p->se.burst_penalty = 0;
+	p->se.burst_score = 0;
+	p->se.child_burst = 0;
+	p->se.child_burst_cnt = 0;
+	p->se.child_burst_last_cached = 0;
+}
+
 void __init sched_init_bore(void)
 {
-	init_task.se.burst_time = 0;
-	init_task.se.prev_burst_penalty = 0;
-	init_task.se.curr_burst_penalty = 0;
-	init_task.se.burst_penalty = 0;
-	init_task.se.burst_score = 0;
-	init_task.se.child_burst_last_cached = 0;
+	reset_task_bore(&init_task);
 
 	printk(KERN_INFO "BORE (Burst-Oriented Response Enhancer) CPU Scheduler modification %s by Masahito Suzuki\n",
 	       SCHED_BORE_VERSION);
@@ -40,26 +49,18 @@ void __init sched_init_bore(void)
 
 void sched_fork_bore(struct task_struct *p)
 {
-	p->se.burst_time = 0;
-	p->se.curr_burst_penalty = 0;
-	p->se.burst_score = 0;
-	p->se.child_burst_last_cached = 0;
+	reset_task_bore(p);
 }
 
-static u32 count_child_tasks(struct task_struct *p)
+static u32 count_entries_upto2(struct list_head *head)
 {
-	struct task_struct *child;
-	u32 cnt = 0;
-
-	list_for_each_entry(child, &p->children, sibling)
-		cnt++;
-
-	return cnt;
+	struct list_head *next = head->next;
+	return (next != head) + (next->next != head);
 }
 
-static inline bool task_is_inheritable(struct task_struct *p)
+static inline bool task_is_bore_eligible(struct task_struct *p)
 {
-	return p->sched_class == &fair_sched_class;
+	return p && p->sched_class == &fair_sched_class && !p->exit_state;
 }
 
 static inline bool child_burst_cache_expired(struct task_struct *p, u64 now)
@@ -87,7 +88,7 @@ static inline void update_child_burst_direct(struct task_struct *p, u64 now)
 	u32 sum = 0;
 
 	list_for_each_entry(child, &p->children, sibling) {
-		if (!task_is_inheritable(child))
+		if (!task_is_bore_eligible(child))
 			continue;
 		cnt++;
 		sum += child->se.burst_penalty;
@@ -115,11 +116,11 @@ static void update_child_burst_topological(struct task_struct *p, u64 now,
 
 	list_for_each_entry(child, &p->children, sibling) {
 		dec = child;
-		while ((dcnt = count_child_tasks(dec)) == 1)
+		while ((dcnt = count_entries_upto2(&dec->children)) == 1)
 			dec = list_first_entry(&dec->children, struct task_struct, sibling);
 
 		if (!dcnt || !depth) {
-			if (!task_is_inheritable(dec))
+			if (!task_is_bore_eligible(dec))
 				continue;
 			cnt++;
 			sum += dec->se.burst_penalty;
@@ -128,6 +129,10 @@ static void update_child_burst_topological(struct task_struct *p, u64 now,
 		if (!child_burst_cache_expired(dec, now)) {
 			cnt += dec->se.child_burst_cnt;
 			sum += (u32)dec->se.child_burst * dec->se.child_burst_cnt;
+
+			if (sched_burst_cache_stop_count <= cnt)
+				break;
+			
 			continue;
 		}
 		update_child_burst_topological(dec, now, depth - 1, &cnt, &sum);
@@ -143,7 +148,7 @@ static inline u8 __inherit_burst_topological(struct task_struct *p, u64 now)
 	struct task_struct *anc = p->real_parent;
 	u32 cnt = 0, sum = 0;
 
-	while (anc->real_parent != anc && count_child_tasks(anc) == 1)
+	while (anc->real_parent != anc && count_entries_upto2(&anc->children) == 1)
 		anc = anc->real_parent;
 
 	if (child_burst_cache_expired(anc, now))
@@ -195,21 +200,31 @@ static inline u32 calc_burst_penalty(u64 burst_time)
 	return min(MAX_BURST_PENALTY, scaled_penalty);
 }
 
+static inline u8 effective_prio(struct task_struct *p)
+{
+	u8 prio = p->static_prio - MAX_RT_PRIO;
+	if (likely(sched_bore))
+		prio += p->se.burst_score;
+	return min(39, prio);
+}
+
 void update_burst_score(struct sched_entity *se)
 {
 	struct task_struct *p;
-	u8 prio, prev_prio, new_prio;
+	u8 prev_prio, new_prio;
+	u8 burst_score = 0;
 
 	if (!entity_is_task(se))
 		return;
 
 	p = task_of(se);
-	prio = p->static_prio - MAX_RT_PRIO;
-	prev_prio = min(39, prio + se->burst_score);
+	prev_prio = effective_prio(p);
 
-	se->burst_score = se->burst_penalty >> 2;
+	if (!((p->flags & PF_KTHREAD) && likely(sched_burst_exclude_kthreads)))
+		burst_score = se->burst_penalty >> 2;
+	se->burst_score = burst_score;
 
-	new_prio = min(39, prio + se->burst_score);
+	new_prio = effective_prio(p);
 	if (new_prio != prev_prio)
 		reweight_task(p, new_prio);
 }
@@ -230,12 +245,18 @@ static inline u32 binary_smooth(u32 new, u32 old)
 		old - (-increment >> (int)sched_burst_smoothness_short);
 }
 
-void restart_burst(struct sched_entity *se)
+static void revolve_burst_penalty(struct sched_entity *se)
 {
-	se->burst_penalty = se->prev_burst_penalty =
+	se->prev_burst_penalty =
 		binary_smooth(se->curr_burst_penalty, se->prev_burst_penalty);
 	se->curr_burst_penalty = 0;
 	se->burst_time = 0;
+}
+
+void restart_burst(struct sched_entity *se)
+{
+	revolve_burst_penalty(se);
+	se->burst_penalty = se->prev_burst_penalty;
 	update_burst_score(se);
 }
 #endif // CONFIG_SCHED_BORE
