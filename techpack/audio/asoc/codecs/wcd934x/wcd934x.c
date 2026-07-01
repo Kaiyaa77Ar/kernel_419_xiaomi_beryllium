@@ -43,6 +43,8 @@
 #include <asoc/wcdcal-hwdep.h>
 #include "wcd934x-dsd.h"
 
+#define CONFIG_SOUND_CONTROL
+
 #define DRV_NAME "tavil_codec"
 
 #define WCD934X_RATES_MASK (SNDRV_PCM_RATE_8000 | SNDRV_PCM_RATE_16000 |\
@@ -155,6 +157,12 @@ enum {
 	POWER_COLLAPSE,
 	POWER_RESUME,
 };
+
+#ifdef CONFIG_SOUND_CONTROL
+static struct snd_soc_component *sound_control_comp_ptr = NULL;
+static int custom_hp_left = 0;
+static int custom_hp_right = 0;
+#endif // CONFIG_SOUND_CONTROL
 
 static int dig_core_collapse_enable = 1;
 module_param(dig_core_collapse_enable, int, 0664);
@@ -1482,6 +1490,15 @@ rtn:
 	mutex_unlock(&tavil_p->codec_mutex);
 	snd_soc_dapm_mux_update_power(widget->dapm, kcontrol,
 				      rx_port_value, e, update);
+
+#ifdef CONFIG_SOUND_CONTROL
+	if (sound_control_comp_ptr) {
+		snd_soc_component_write(sound_control_comp_ptr, WCD934X_CDC_RX1_RX_VOL_MIX_CTL, custom_hp_left);
+		snd_soc_component_write(sound_control_comp_ptr, WCD934X_CDC_RX2_RX_VOL_MIX_CTL, custom_hp_right);
+		snd_soc_component_write(sound_control_comp_ptr, WCD934X_CDC_RX1_RX_VOL_CTL, custom_hp_left);
+		snd_soc_component_write(sound_control_comp_ptr, WCD934X_CDC_RX2_RX_VOL_CTL, custom_hp_right);
+	}
+#endif // CONFIG_SOUND_CONTROL
 
 	return 0;
 err:
@@ -6601,10 +6618,12 @@ static const struct snd_kcontrol_new tavil_snd_controls[] = {
 
 	SOC_SINGLE_SX_TLV("RX0 Digital Volume", WCD934X_CDC_RX0_RX_VOL_CTL,
 		0, -84, 40, digital_gain), /* -84dB min - 40dB max */
+#ifndef CONFIG_SOUND_CONTROL
 	SOC_SINGLE_SX_TLV("RX1 Digital Volume", WCD934X_CDC_RX1_RX_VOL_CTL,
 		0, -84, 40, digital_gain),
 	SOC_SINGLE_SX_TLV("RX2 Digital Volume", WCD934X_CDC_RX2_RX_VOL_CTL,
 		0, -84, 40, digital_gain),
+#endif // CONFIG_SOUND_CONTROL
 	SOC_SINGLE_SX_TLV("RX3 Digital Volume", WCD934X_CDC_RX3_RX_VOL_CTL,
 		0, -84, 40, digital_gain),
 	SOC_SINGLE_SX_TLV("RX4 Digital Volume", WCD934X_CDC_RX4_RX_VOL_CTL,
@@ -6615,10 +6634,12 @@ static const struct snd_kcontrol_new tavil_snd_controls[] = {
 		0, -84, 40, digital_gain),
 	SOC_SINGLE_SX_TLV("RX0 Mix Digital Volume",
 		WCD934X_CDC_RX0_RX_VOL_MIX_CTL, 0, -84, 40, digital_gain),
+#ifndef CONFIG_SOUND_CONTROL
 	SOC_SINGLE_SX_TLV("RX1 Mix Digital Volume",
 		WCD934X_CDC_RX1_RX_VOL_MIX_CTL, 0, -84, 40, digital_gain),
 	SOC_SINGLE_SX_TLV("RX2 Mix Digital Volume",
 		WCD934X_CDC_RX2_RX_VOL_MIX_CTL, 0, -84, 40, digital_gain),
+#endif // CONFIG_SOUND_CONTROL
 	SOC_SINGLE_SX_TLV("RX3 Mix Digital Volume",
 		WCD934X_CDC_RX3_RX_VOL_MIX_CTL, 0, -84, 40, digital_gain),
 	SOC_SINGLE_SX_TLV("RX4 Mix Digital Volume",
@@ -10505,6 +10526,113 @@ done:
 	return ret;
 }
 
+#ifdef CONFIG_SOUND_CONTROL
+static ssize_t headphone_gain_show(struct kobject *kobj,
+		struct kobj_attribute *attr, char *buf)
+{
+	unsigned int val_l = 0, val_r = 0;
+	if (!sound_control_comp_ptr) return 0;
+	
+	/* Baca nilai dan simpan ke variabel val_l dan val_r (3 argumen) */
+	snd_soc_component_read(sound_control_comp_ptr, WCD934X_CDC_RX1_RX_VOL_CTL, &val_l);
+	snd_soc_component_read(sound_control_comp_ptr, WCD934X_CDC_RX2_RX_VOL_CTL, &val_r);
+	
+	return snprintf(buf, PAGE_SIZE, "%d %d\n", val_l, val_r);
+}
+
+static ssize_t headphone_gain_store(struct kobject *kobj,
+		struct kobj_attribute *attr, const char *buf, size_t count)
+{
+	int input_l, input_r;
+	if (!sound_control_comp_ptr) return count;
+
+	sscanf(buf, "%d %d", &input_l, &input_r);
+
+	if (input_l < -84 || input_l > 20) input_l = 0;
+	if (input_r < -84 || input_r > 20) input_r = 0;
+
+    custom_hp_left = input_l;
+	custom_hp_right = input_r;
+
+	snd_soc_component_write(sound_control_comp_ptr, WCD934X_CDC_RX1_RX_VOL_MIX_CTL, input_l);
+	snd_soc_component_write(sound_control_comp_ptr, WCD934X_CDC_RX2_RX_VOL_MIX_CTL, input_r);
+	snd_soc_component_write(sound_control_comp_ptr, WCD934X_CDC_RX1_RX_VOL_CTL, input_l);
+	snd_soc_component_write(sound_control_comp_ptr, WCD934X_CDC_RX2_RX_VOL_CTL, input_r);
+
+	return count;
+}
+
+static struct kobj_attribute headphone_gain_attribute =
+	__ATTR(headphone_gain, 0664, headphone_gain_show, headphone_gain_store);
+
+static ssize_t mic_gain_show(struct kobject *kobj,
+		struct kobj_attribute *attr, char *buf)
+{
+	unsigned int val = 0;
+	if (!sound_control_comp_ptr) return 0;
+	
+	snd_soc_component_read(sound_control_comp_ptr, WCD934X_CDC_TX7_TX_VOL_CTL, &val);
+	return snprintf(buf, PAGE_SIZE, "%d\n", val);
+}
+
+static ssize_t mic_gain_store(struct kobject *kobj,
+		struct kobj_attribute *attr, const char *buf, size_t count)
+{
+	int input;
+	if (!sound_control_comp_ptr) return count;
+
+	sscanf(buf, "%d", &input);
+	if (input < -10 || input > 20) input = 0;
+
+	snd_soc_component_write(sound_control_comp_ptr, WCD934X_CDC_TX7_TX_VOL_CTL, input);
+	return count;
+}
+
+static struct kobj_attribute mic_gain_attribute =
+	__ATTR(mic_gain, 0664, mic_gain_show, mic_gain_store);
+
+static ssize_t earpiece_gain_show(struct kobject *kobj,
+		struct kobj_attribute *attr, char *buf)
+{
+	unsigned int val = 0;
+	if (!sound_control_comp_ptr) return 0;
+
+	snd_soc_component_read(sound_control_comp_ptr, WCD934X_CDC_RX0_RX_VOL_CTL, &val);
+	return snprintf(buf, PAGE_SIZE, "%d\n", val);
+}
+
+static ssize_t earpiece_gain_store(struct kobject *kobj,
+		struct kobj_attribute *attr, const char *buf, size_t count)
+{
+	int input;
+	if (!sound_control_comp_ptr) return count;
+
+	sscanf(buf, "%d", &input);
+	if (input < -10 || input > 20) input = 0;
+
+	snd_soc_component_write(sound_control_comp_ptr, WCD934X_CDC_RX0_RX_VOL_CTL, input);
+	return count;
+}
+
+static struct kobj_attribute earpiece_gain_attribute =
+	__ATTR(earpiece_gain, 0664, earpiece_gain_show, earpiece_gain_store);
+
+static struct attribute *sound_control_attrs[] = {
+		&headphone_gain_attribute.attr,
+		&mic_gain_attribute.attr,
+		&earpiece_gain_attribute.attr,
+		NULL,
+};
+
+static struct attribute_group sound_control_attr_group = {
+		.attrs = sound_control_attrs,
+};
+
+static struct kobject *sound_control_kobj;
+#endif // CONFIG_SOUND_CONTROL
+
+
+
 static int tavil_soc_codec_probe(struct snd_soc_component *component)
 {
 	struct wcd9xxx *control;
@@ -10514,6 +10642,10 @@ static int tavil_soc_codec_probe(struct snd_soc_component *component)
 			snd_soc_component_get_dapm(component);
 	int i, ret;
 	void *ptr = NULL;
+
+#ifdef CONFIG_SOUND_CONTROL
+	sound_control_comp_ptr = component;
+#endif //CONFIG_SOUND_CONTROL
 
 	control = dev_get_drvdata(component->dev->parent);
 
@@ -11471,6 +11603,18 @@ static int tavil_probe(struct platform_device *pdev)
 			dev_dbg(tavil->dev, "%s micb load get failed\n",
 				__func__);
 	}
+
+#ifdef CONFIG_SOUND_CONTROL
+	sound_control_kobj = kobject_create_and_add("sound_control", kernel_kobj);
+	if (sound_control_kobj == NULL) {
+		pr_warn("%s kobject create failed!\n", __func__);
+        }
+
+	ret = sysfs_create_group(sound_control_kobj, &sound_control_attr_group);
+        if (ret) {
+		pr_warn("%s sysfs file create failed!\n", __func__);
+	}
+#endif // CONFIG_SOUND_CONTROL
 
 	return ret;
 
