@@ -25,6 +25,10 @@
 #include "pelt.h"
 #include "walt.h"
 
+#ifdef CONFIG_SCHED_BORE
+#include <linux/sched/bore.h>
+#endif // CONFIG_SCHED_BORE
+
 #define CREATE_TRACE_POINTS
 #include <trace/events/sched.h>
 
@@ -3040,6 +3044,9 @@ static void __sched_fork(unsigned long clone_flags, struct task_struct *p)
 	p->se.prev_sum_exec_runtime	= 0;
 	p->se.nr_migrations		= 0;
 	p->se.vruntime			= 0;
+#ifdef CONFIG_SCHED_BORE
+	sched_fork_bore(p);
+#endif // CONFIG_SCHED_BORE
 	p->last_sleep_ts		= 0;
 	p->boost			= 0;
 	p->boost_expires		= 0;
@@ -3276,6 +3283,13 @@ int sched_fork(unsigned long clone_flags, struct task_struct *p)
 #endif
 	return 0;
 }
+
+#ifdef CONFIG_SCHED_BORE
+void sched_post_fork(struct task_struct *p)
+{
+	sched_post_fork_bore(p);
+}
+#endif // CONFIG_SCHED_BORE
 
 u64 to_ratio(u64 period, u64 runtime)
 {
@@ -7362,6 +7376,10 @@ void __init sched_init(void)
 {
 	int i, j;
 	unsigned long alloc_size = 0, ptr;
+
+#ifdef CONFIG_SCHED_BORE
+	sched_init_bore();
+#endif // CONFIG_SCHED_BORE
 
 	wait_bit_init();
 
