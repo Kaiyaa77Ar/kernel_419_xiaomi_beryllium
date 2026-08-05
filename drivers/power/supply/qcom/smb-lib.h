@@ -93,6 +93,7 @@ enum hvdcp3_type {
 #define OV_VOTER			"OV_VOTER"
 #define FG_ESR_VOTER			"FG_ESR_VOTER"
 #define FCC_STEPPER_VOTER		"FCC_STEPPER_VOTER"
+#define BYPASS_CHARGE_VOTER		"BYPASS_CHARGE_VOTER"
 #if defined(CONFIG_MACH_XIAOMI_SDM845)
 #define DCIN_USER_VOTER                "DCIN_USER_VOTER"
 #define UNSTANDARD_QC2_VOTER			"UNSTANDARD_QC2_VOTER"
@@ -513,6 +514,14 @@ struct smb_charger {
 	int			precheck_charger_type;
 #endif
 };
+
+extern bool bypass_charge_active;
+void bypass_charge_set_active(bool active);
+
+static inline bool is_bypass_active(void)
+{
+	return READ_ONCE(bypass_charge_active);
+}
 
 #if defined(CONFIG_MACH_XIAOMI_SDM845)
 enum quick_charge_type {

@@ -31,6 +31,16 @@
 				__func__, ##__VA_ARGS__);	\
 	} while (0)
 
+bool bypass_charge_active = false;
+EXPORT_SYMBOL(bypass_charge_active);
+
+void bypass_charge_set_active(bool active)
+{
+	WRITE_ONCE(bypass_charge_active, active);
+	pr_info("smb-lib: bypass charging %s\n", active ? "enabled" : "disabled");
+}
+EXPORT_SYMBOL(bypass_charge_set_active);
+
 #if defined(CONFIG_MACH_XIAOMI_SDM845)
 static bool off_charge_flag;
 static void smblib_wireless_set_enable(struct smb_charger *chg, int enable);
@@ -2060,13 +2070,11 @@ int smblib_vbus_regulator_is_enabled(struct regulator_dev *rdev)
 int smblib_get_prop_input_suspend(struct smb_charger *chg,
 				  union power_supply_propval *val)
 {
-	val->intval
-		= (get_client_vote(chg->usb_icl_votable, USER_VOTER) == 0)
-#if defined(CONFIG_MACH_XIAOMI_SDM845)
-		|| get_client_vote(chg->dc_suspend_votable, USER_VOTER);
-#else
-		 && get_client_vote(chg->dc_suspend_votable, USER_VOTER);
-#endif
+	int usb_suspended = get_client_vote(chg->usb_icl_votable, USER_VOTER) == 0;
+	int dc_suspended = get_client_vote(chg->dc_suspend_votable, USER_VOTER);
+
+	val->intval = usb_suspended || dc_suspended || is_bypass_active();
+
 	return 0;
 }
 
@@ -2498,6 +2506,16 @@ int smblib_set_prop_input_suspend(struct smb_charger *chg,
 {
 	int rc;
 
+	/*
+	 * When bypass charging is active, the charging path is disabled
+	 * but the system must remain powered from USB. Do not allow
+	 * external suspend requests to cut off the USB input current.
+	 */
+	if (is_bypass_active() && val->intval) {
+		smblib_dbg(chg, PR_MISC, "Bypass active, ignoring input suspend\n");
+		return 0;
+	}
+
 	/* vote 0mA when suspended */
 	rc = vote(chg->usb_icl_votable, USER_VOTER, (bool)val->intval, 0);
 	if (rc < 0) {
@@ -2554,6 +2572,9 @@ int smblib_set_prop_dc_temp_level(struct smb_charger *chg,
 	union power_supply_propval dc_present;
 	union power_supply_propval batt_temp;
 	int rc;
+
+	if (is_bypass_active())
+		return 0;
 
 	rc = smblib_get_prop_dc_present(chg, &dc_present);
 	if (rc < 0) {
@@ -2717,62 +2738,64 @@ static void smblib_reg_work(struct work_struct *work)
 static int smblib_therm_charging(struct smb_charger *chg)
 {
 	int thermal_icl_ua = 0;
+	int level;
 	int rc;
 
 	if (chg->system_temp_level >= MAX_TEMP_LEVEL)
 		return 0;
 
+	level = is_bypass_active() ? 0 : chg->system_temp_level;
+
 	switch (chg->usb_psy_desc.type) {
 	case POWER_SUPPLY_TYPE_USB_HVDCP:
-		thermal_icl_ua = chg->thermal_mitigation_qc2[chg->system_temp_level];
+		thermal_icl_ua = chg->thermal_mitigation_qc2[level];
 		break;
 	case POWER_SUPPLY_TYPE_USB_HVDCP_3:
-		thermal_icl_ua =
-			chg->thermal_mitigation_qc3[chg->system_temp_level];
+		thermal_icl_ua = chg->thermal_mitigation_qc3[level];
 		break;
 	case POWER_SUPPLY_TYPE_USB_PD:
 		if (chg->voltage_min_uv >= PD_MICRO_5V
 				&& chg->voltage_min_uv < PD_MICRO_5P9V)
 			thermal_icl_ua =
-					chg->thermal_mitigation_pd_base[chg->system_temp_level];
+					chg->thermal_mitigation_pd_base[level];
 		else if (chg->voltage_min_uv >= PD_MICRO_5P9V
 					&& chg->voltage_min_uv < PD_MICRO_6P5V)
 			thermal_icl_ua =
-					chg->thermal_mitigation_pd_base[chg->system_temp_level]
+					chg->thermal_mitigation_pd_base[level]
 						* PD_6P5V_PERCENT / 100;
 		else if (chg->voltage_min_uv >= PD_MICRO_6P5V
 					&& chg->voltage_min_uv < PD_MICRO_7P5V)
 			thermal_icl_ua =
-					chg->thermal_mitigation_pd_base[chg->system_temp_level]
+					chg->thermal_mitigation_pd_base[level]
 						* PD_7P5V_PERCENT / 100;
 		else if (chg->voltage_min_uv >= PD_MICRO_7P5V
 					&& chg->voltage_min_uv <= PD_MICRO_8P5V)
 			thermal_icl_ua =
-					chg->thermal_mitigation_pd_base[chg->system_temp_level]
+					chg->thermal_mitigation_pd_base[level]
 						* PD_8P5V_PERCENT / 100;
 		else if (chg->voltage_min_uv >= PD_MICRO_8P5V)
 			thermal_icl_ua =
-					chg->thermal_mitigation_pd_base[chg->system_temp_level]
+					chg->thermal_mitigation_pd_base[level]
 						* PD_9V_PERCENT / 100;
 		else
 			thermal_icl_ua =
-					chg->thermal_mitigation_pd_base[chg->system_temp_level];
+					chg->thermal_mitigation_pd_base[level];
 		break;
 	case POWER_SUPPLY_TYPE_USB_DCP:
 	default:
-		thermal_icl_ua = chg->thermal_mitigation_dcp[chg->system_temp_level];
+		thermal_icl_ua = chg->thermal_mitigation_dcp[level];
 		break;
 	}
 
-	if (chg->system_temp_level == 0) {
+	if (level == 0) {
 		/* if therm_lvl_sel is 0, clear thermal voter */
 		rc = vote(chg->usb_icl_votable, THERMAL_DAEMON_VOTER, false, 0);
 		if (rc < 0)
 			pr_err("Couldn't disable USB thermal ICL vote rc=%d\n",
 				rc);
 	} else {
-		pr_info("thermal_icl_ua is %d, chg->system_temp_level: %d\n",
-				thermal_icl_ua, chg->system_temp_level);
+		pr_info("thermal_icl_ua is %d, level: %d\n",
+				thermal_icl_ua, level);
 
 		rc = vote(chg->usb_icl_votable, THERMAL_DAEMON_VOTER, true,
 					thermal_icl_ua);

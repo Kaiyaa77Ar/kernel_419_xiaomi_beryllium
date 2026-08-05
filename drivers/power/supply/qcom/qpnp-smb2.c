@@ -21,6 +21,7 @@
 #include "storm-watch.h"
 #include <linux/pmic-voter.h>
 #include <linux/kobject.h>
+#include <linux/mutex.h>
 
 #define SMB2_DEFAULT_WPWR_UW	8000000
 
@@ -3017,27 +3018,39 @@ static void smb2_create_debugfs(struct smb2 *chip)
 
 #endif
 
-static struct smb_charger *global_smb_chg = NULL;
-static int bypass_charging_val = 0;
+static struct smb_charger *bypass_chg;
+static struct kobject *bypass_kobj;
+static DEFINE_MUTEX(bypass_lock);
 
-static ssize_t bypass_charging_show(struct kobject *kobj, struct kobj_attribute *attr, char *buf)
+static ssize_t bypass_charging_show(struct kobject *kobj,
+				    struct kobj_attribute *attr, char *buf)
 {
-	return sprintf(buf, "%d\n", bypass_charging_val);
+	return sprintf(buf, "%d\n", is_bypass_active() ? 1 : 0);
 }
 
-static ssize_t bypass_charging_store(struct kobject *kobj, struct kobj_attribute *attr, const char *buf, size_t count)
+static ssize_t bypass_charging_store(struct kobject *kobj,
+				     struct kobj_attribute *attr,
+				     const char *buf, size_t count)
 {
 	int val;
-	if (sscanf(buf, "%d", &val) == 1) {
-		bypass_charging_val = !!val; /* 1 = bypass on (charging disabled), 0 = bypass off (normal) */
-		if (global_smb_chg && global_smb_chg->chg_disable_votable) {
-			vote(global_smb_chg->chg_disable_votable, "BYPASS_CHARGE_VOTER", bypass_charging_val, 0);
-		}
+
+	if (sscanf(buf, "%d", &val) != 1)
+		return -EINVAL;
+
+	mutex_lock(&bypass_lock);
+	if (bypass_chg && bypass_chg->chg_disable_votable) {
+		bool enable = !!val;
+		vote(bypass_chg->chg_disable_votable,
+		     BYPASS_CHARGE_VOTER, enable, 0);
+		bypass_charge_set_active(enable);
 	}
+	mutex_unlock(&bypass_lock);
+
 	return count;
 }
 
-static struct kobj_attribute bypass_charging_attr = __ATTR(bypass_charging, 0644, bypass_charging_show, bypass_charging_store);
+static struct kobj_attribute bypass_charging_attr =
+	__ATTR(bypass_charging, 0644, bypass_charging_show, bypass_charging_store);
 
 static struct attribute *bypass_charge_attrs[] = {
 	&bypass_charging_attr.attr,
@@ -3048,15 +3061,38 @@ static struct attribute_group bypass_charge_attr_group = {
 	.attrs = bypass_charge_attrs,
 };
 
-static struct kobject *bypass_charge_kobj;
-
 static void bypass_charge_sysfs_init(struct smb_charger *chg)
 {
-	global_smb_chg = chg;
-	bypass_charge_kobj = kobject_create_and_add("bypass_charge", kernel_kobj);
-	if (bypass_charge_kobj) {
-		sysfs_create_group(bypass_charge_kobj, &bypass_charge_attr_group);
+	int rc;
+
+	if (!chg->chg_disable_votable) {
+		pr_err("bypass_charge: chg_disable_votable not ready\n");
+		return;
 	}
+
+	bypass_chg = chg;
+	bypass_kobj = kobject_create_and_add("bypass_charge", kernel_kobj);
+	if (!bypass_kobj)
+		return;
+
+	rc = sysfs_create_group(bypass_kobj, &bypass_charge_attr_group);
+	if (rc) {
+		kobject_put(bypass_kobj);
+		bypass_kobj = NULL;
+		bypass_chg = NULL;
+	}
+}
+
+static void bypass_charge_sysfs_exit(void)
+{
+	mutex_lock(&bypass_lock);
+	if (bypass_kobj) {
+		sysfs_remove_group(bypass_kobj, &bypass_charge_attr_group);
+		kobject_put(bypass_kobj);
+		bypass_kobj = NULL;
+	}
+	bypass_chg = NULL;
+	mutex_unlock(&bypass_lock);
 }
 
 static int smb2_probe(struct platform_device *pdev)
@@ -3289,6 +3325,8 @@ static int smb2_remove(struct platform_device *pdev)
 {
 	struct smb2 *chip = platform_get_drvdata(pdev);
 	struct smb_charger *chg = &chip->chg;
+
+	bypass_charge_sysfs_exit();
 
 	power_supply_unregister(chg->batt_psy);
 	power_supply_unregister(chg->usb_psy);
