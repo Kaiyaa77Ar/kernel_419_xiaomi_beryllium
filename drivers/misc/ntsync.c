@@ -19,7 +19,7 @@
 #include <linux/sched/signal.h>
 #include <linux/slab.h>
 #include <linux/spinlock.h>
-#include <linux/time_namespace.h>
+#include <linux/uaccess.h>
 #include <uapi/linux/ntsync.h>
 
 #define NTSYNC_NAME	"ntsync"
@@ -42,6 +42,11 @@ enum ntsync_type {
  * Wait operations take a reference to each object being waited on for
  * the duration of the wait.
  */
+
+static inline ktime_t timens_ktime_to_host(clockid_t which_clock, ktime_t kt)
+{
+	return kt;
+}
 
 struct ntsync_obj {
 	spinlock_t lock;
@@ -723,12 +728,23 @@ static struct ntsync_obj *ntsync_alloc_obj(struct ntsync_device *dev,
 
 static int ntsync_obj_get_fd(struct ntsync_obj *obj)
 {
-	FD_PREPARE(fdf, O_CLOEXEC,
-		   anon_inode_getfile("ntsync", &ntsync_obj_fops, obj, O_RDWR));
-	if (fdf.err)
-		return fdf.err;
-	obj->file = fd_prepare_file(fdf);
-	return fd_publish(fdf);
+	int fd;
+	struct file *file;
+
+	fd = get_unused_fd_flags(O_CLOEXEC);
+	if (fd < 0)
+		return fd;
+
+	file = anon_inode_getfile("ntsync", &ntsync_obj_fops, obj, O_RDWR);
+	if (IS_ERR(file)) {
+		put_unused_fd(fd);
+		return PTR_ERR(file);
+	}
+
+	obj->file = file;
+	fd_install(fd, file);
+
+	return fd;
 }
 
 static int ntsync_create_sem(struct ntsync_device *dev, void __user *argp)
