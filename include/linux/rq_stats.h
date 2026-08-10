@@ -3,6 +3,8 @@
  * Copyright (c) 2011,2013-2014,2019, The Linux Foundation. All rights reserved.
  */
 
+#ifdef CONFIG_QCOM_RUN_QUEUE_STATS
+
 struct rq_data {
 	unsigned long def_timer_jiffies;
 	unsigned long def_timer_last_jiffy;
@@ -13,6 +15,8 @@ struct rq_data {
 	int init;
 };
 
-extern spinlock_t rq_lock;
 extern struct rq_data rq_info;
 extern struct workqueue_struct *rq_wq;
+extern spinlock_t rq_lock;
+
+#endif
